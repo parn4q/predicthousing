@@ -1,0 +1,1062 @@
+---
+title: "Project 2"
+author: "Andrew Ross"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(DataExplorer)
+library(caret)
+library(scales)
+library(ggpubr)
+```
+
+# Introduction
+
+Congratulations! You've had the thought of becoming a home owner in Ames, Iowa.  We can imagine you have many 
+questions as well as wants about your dream home. The biggest concern will be the price.  The price will go up
+the more wants you have.  However, the realtor may not be able to give a precise answer to the
+cost.  Here we provide a scientific approach to studying houses in Ames, Iowa to predict the sales price of the
+house. We present a XBTree Boost, Random Forest, and a Multiple Adaptive Regression Splines model.
+
+# Data/ Exploratory Data Analysis
+
+The housing data contains 1460 houses and 81 characteristics of the house. We analyzed
+each feature to see which feature is important. 
+
+First thing to note about this data set is that there are 6965 NA values (~6% of the data) that need to be addressed.  
+We assume if a feature is a continuous variable such as any feature related to 'area', then any NA value will be 0.
+We assume if a feature is a factor such as whether or not the house has a fence or not,
+then any NA value will be 'None' if it has more than 1 factor or 0 if the feature is binary. This can cause issues for some factor features because the features itself could have one NA value, so transforming it to 'None' implies another factor in the feature.  This caused issues in the models because the 'None' factor had
+0 variance.  Therefore, when situations like this occurred, the features were removed because removing NA values was a problem for the Kaggle results.  It required us to submit 1459 predictions.
+
+The sale price of a house is the feature of interest.  Below are two plots: one
+represents the feature itself and the second shows the feature with a log
+transformation.
+
+```{r, include=FALSE}
+data = read.csv("D:\\Data Analysis 3\\Project 2\\train.csv")
+
+colnames(data)
+
+head(data, 5)
+
+data %>%
+  summarise_all(~sum(is.na(.))) |> sum()
+
+```
+
+
+
+```{r, include=FALSE, eval=FALSE}
+
+# street is the only pointless variable here.
+
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, MSSubClass) |> 
+  ggplot(aes(x = MSSubClass, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, MSZoning) |> 
+  ggplot(aes(x = MSZoning, y = SalePrice)) + geom_point(),
+  
+data |> dplyr::select(SalePrice, LotFrontage) |> 
+  ggplot(aes(x = LotFrontage, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, LotArea) |> 
+  ggplot(aes(x = LotArea, y = SalePrice)) + geom_point() ,        
+
+data |> dplyr::select(SalePrice, Street) |> 
+  ggplot(aes(x = Street, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, Alley) |> 
+  ggplot(aes(x = Alley, y = SalePrice)) + geom_point()
+
+)
+
+
+data |> dplyr::select(SalePrice, MSSubClass) |> 
+  ggplot(aes(x = MSSubClass, y = SalePrice)) + geom_point() + 
+  scale_x_continuous(breaks = seq(from = 20, to = 190, by = 10))
+
+data |> dplyr::select(SalePrice, LotArea) |> ggplot(aes(x = LotArea, y = SalePrice)) + geom_point()
+
+table(data$Street)
+
+
+
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, YearBuilt) |> 
+  ggplot(aes(x = YearBuilt, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, YearRemodAdd) |> 
+  ggplot(aes(x = YearRemodAdd, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, RoofStyle) |> 
+  ggplot(aes(x = RoofStyle, y = SalePrice)) + geom_col(),
+
+data |> dplyr::select(SalePrice, RoofMatl) |> 
+  ggplot(aes(x = RoofMatl, y = SalePrice)) + geom_col()
+
+)
+
+# As a house gets older, the sales price is lower
+
+data |> dplyr::select(SalePrice, YearBuilt) |> mutate(House_Age = 2023 - YearBuilt) |>
+  ggplot(aes(x = House_Age, y = SalePrice)) + geom_point() + scale_y_continuous(labels = label_dollar()) +
+  scale_x_continuous(breaks = seq(from = 10, to = 160, by = 10)) + labs(title = 'Price vs Age of House')
+
+data |> dplyr::select(SalePrice, YearBuilt,YearRemodAdd) |> mutate(House_Age = 2023-YearBuilt) |>
+  mutate(remod = ifelse(YearRemodAdd - YearBuilt > 0, 1, 0)) |> ggplot(aes(remod, House_Age, group = remod)) + geom_boxplot()
+
+
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+
+#utilities is useless
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, LotShape) |> 
+  ggplot(aes(x = LotShape, y = SalePrice, group = LotShape)) + geom_boxplot(),
+
+data |> dplyr::select(SalePrice, LandContour) |> 
+  ggplot(aes(x = LandContour, y = SalePrice, group = LandContour)) + geom_boxplot() ,        
+
+data |> dplyr::select(SalePrice, Utilities) |> 
+  ggplot(aes(x = Utilities, y = SalePrice, group = Utilities)) + geom_boxplot(),
+
+data |> dplyr::select(SalePrice, LotConfig) |> 
+  ggplot(aes(x = LotConfig, y = SalePrice,group = LotConfig)) + geom_boxplot()
+
+)
+
+
+```
+
+
+
+```{r, include=FALSE, eval=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, LandSlope) |> 
+  ggplot(aes(x = LandSlope, y = SalePrice, group = LandSlope)) + geom_boxplot(),
+
+data |> dplyr::select(SalePrice, Neighborhood) |> 
+  ggplot(aes(x = Neighborhood, y = SalePrice, group = Neighborhood)) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90)),
+
+data |> dplyr::select(SalePrice, Condition1) |> 
+  ggplot(aes(x = Condition1, y = SalePrice, group = Condition1)) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90)),
+
+data |> dplyr::select(SalePrice, Condition2) |> 
+  ggplot(aes(x = Condition2, y = SalePrice, group = Condition2)) + geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 90))
+
+)
+
+```
+
+
+```{r, include=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, OverallQual) |> 
+  ggplot(aes(x = OverallQual, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, OverallCond) |> 
+  ggplot(aes(x = OverallCond, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BldgType) |> 
+  ggplot(aes(x = BldgType, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, HouseStyle) |> 
+  ggplot(aes(x = HouseStyle, y = SalePrice)) + geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+
+)
+
+data |> dplyr::select(SalePrice, OverallQual, OverallCond) |> cor()
+
+```
+
+```{r, include=FALSE}
+#looking at year sold with price. Not too many differences between the 5 years
+
+meanyear = data |> dplyr::select(SalePrice, YrSold) |> group_by(YrSold) |> summarize(mean = mean(SalePrice), median = median(SalePrice))
+data |> dplyr::select(SalePrice, YrSold) |> group_by(YrSold) |> count()
+
+
+data |> ggplot(mapping = aes(YrSold,SalePrice, group = YrSold)) + geom_boxplot()  +
+  annotate('text' , x = c(2006, 2007, 2008, 2009, 2010), y = 700000,label = c(314, 329, 304, 338, 175)) +
+  labs(title = 'The Distribution of Pricing Over the Years', 
+  subtitle = 'numbers represent the total number of houses each year', y = 'Price', x = 'Year') +
+  scale_y_continuous(labels = label_dollar()) 
+
+```
+
+
+
+```{r, include=FALSE}
+#sales price and mo sale.  There isn't much of a difference between them month sold or the seasons involved
+
+hist(data$MoSold)
+
+data |> dplyr::select(SalePrice, MoSold) |> ggplot(mapping = aes(MoSold, SalePrice, group = MoSold)) + geom_boxplot() +
+  labs(title = 'Price by Month', x = 'Month') +  scale_y_continuous(labels = label_dollar()) + 
+  scale_x_continuous(breaks = c(1:12))
+
+data |> dplyr::select(SalePrice, MoSold) |> mutate(Seasons = case_when(MoSold == 12 | MoSold == 1 | MoSold == 2~'Winter',
+                                                                       MoSold == 3 | MoSold == 4 | MoSold == 5~'Spring',
+                                                                       MoSold == 6 | MoSold == 7 | MoSold == 8~'Summer',
+                                                                       MoSold == 9 | MoSold == 10 | MoSold == 11~'Fall')) |>
+  group_by(Seasons) |> summarize(Mean = mean(SalePrice), Median = median(SalePrice))
+
+data |> dplyr::select(SalePrice, MoSold) |> mutate(Seasons = case_when(MoSold == 12 | MoSold == 1 | MoSold == 2~'Winter',
+                                                                       MoSold == 3 | MoSold == 4 | MoSold == 5~'Spring',
+                                                                       MoSold == 6 | MoSold == 7 | MoSold == 8~'Summer',
+                                                                       MoSold == 9 | MoSold == 10 | MoSold == 11~'Fall')) |>
+  ggplot(aes( x = Seasons, y = SalePrice, group = Seasons)) + geom_boxplot()
+
+
+```
+
+```{r, include=FALSE}
+
+#miscval is probably useless in the model
+
+data |> dplyr::select(SalePrice, MiscVal, MiscFeature) |> ggplot(mapping = aes(MiscFeature, SalePrice)) + geom_col()
+
+data |> dplyr::select(SalePrice, MiscVal, MiscFeature) |> ggplot(mapping = aes(MiscVal, MiscFeature)) + geom_point()
+
+data |> dplyr::select(SalePrice, MiscVal, MiscFeature) |> group_by(MiscFeature) |> count()
+
+
+```
+
+```{r, include=FALSE}
+
+#sale price and fence. May make this into an indicator. If have fence or nah
+
+#it may bring the price down if it has a fence
+
+data |> dplyr::select(SalePrice, Fence) |> group_by(Fence) |> count()
+
+data |> dplyr::select(SalePrice, Fence) |> ggplot(mapping = aes(x = Fence, y = SalePrice, group = Fence)) +
+  geom_boxplot()
+
+data |> dplyr::select(SalePrice, Fence) |> mutate(Fenceyn = ifelse(is.na(Fence), 0, 1)) |>
+  ggplot(mapping = aes(x = Fenceyn, y = SalePrice, group = Fenceyn)) + geom_boxplot()
+
+
+```
+
+
+
+```{r, include=FALSE}
+# sales price and pool quality.  Probably wont use
+
+data |> dplyr::select(SalePrice, PoolQC) |> group_by(PoolQC) |> count()
+
+```
+
+```{r, include=FALSE}
+# sales price and pool area.  Probably won't use
+head(data$PoolArea, 100)
+
+data |> dplyr::select(SalePrice, PoolArea) |> ggplot(mapping = aes(x = PoolArea, y = SalePrice))+ geom_point()
+
+```
+
+```{r, include=FALSE}
+# sales price and screen porch.  It seems the larger the area, the more expensive the house
+
+#making a yes no for this doesn't look like it changes the housing value much
+
+data |> dplyr::select(SalePrice, ScreenPorch) |> ggplot(aes(x = ScreenPorch, y = SalePrice)) + geom_point()
+
+data |> dplyr::select(SalePrice, ScreenPorch) |> mutate(Screenyn = ifelse(ScreenPorch==0, 0, 1)) |>
+  ggplot(mapping = aes(x = Screenyn, y = SalePrice, group = Screenyn)) + geom_boxplot()
+
+data |> dplyr::select(SalePrice, ScreenPorch, EnclosedPorch, Fence)
+
+table(data$X3SsnPorch)
+
+```
+
+```{r, include=FALSE}
+
+#probably wont use
+
+data |> dplyr::select(SalePrice, X3SsnPorch) |> ggplot(aes(x = X3SsnPorch, y = SalePrice)) + geom_point()
+# sales price vs enclosed porch
+
+#Sales price has a nonlinear trend with enclosed porch as the number of square footage increases.
+#using a y/n column for it, we get the average sales price decreases
+
+data |> dplyr::select(SalePrice, EnclosedPorch) |> ggplot(aes(x = EnclosedPorch, y = SalePrice)) + geom_point() 
+
+data |> dplyr::select(SalePrice, EnclosedPorch) |> mutate(EnclosedPorchyn = ifelse(EnclosedPorch == 0, 0, 1)) |>
+  ggplot(aes(x = EnclosedPorchyn, y = SalePrice)) + geom_point() 
+
+# Theres a lot of variability going on here. Using the same method as before with y/n, It looks like the sales
+#price increases on average
+
+data |> dplyr::select(SalePrice, OpenPorchSF) |> ggplot(aes(x = OpenPorchSF, y = SalePrice)) + geom_point() 
+
+data |> dplyr::select(SalePrice, OpenPorchSF) |> mutate(OpenPorchSFyn = ifelse(OpenPorchSF == 0, 0, 1)) |> 
+  ggplot(aes(x = OpenPorchSFyn, y = SalePrice)) + geom_point() 
+
+data |> dplyr::select(SalePrice, ScreenPorch, OpenPorchSF, X3SsnPorch, EnclosedPorch) |> cor()
+
+data |> dplyr::select(SalePrice, ScreenPorch, OpenPorchSF, X3SsnPorch, EnclosedPorch) |> 
+  ggplot(aes(x = ScreenPorch, y = EnclosedPorch)) + geom_point()
+
+
+```
+
+```{r, include=FALSE}
+#Same dealio as before
+
+data |> dplyr::select(SalePrice, WoodDeckSF) |> ggplot(aes(x = WoodDeckSF, y = SalePrice)) + geom_point()
+
+data |> dplyr::select(SalePrice, WoodDeckSF) |> mutate(WoodDeckSFyn = ifelse(WoodDeckSF == 0, 0, 1)) |> ggplot(aes(x = WoodDeckSFyn, y = SalePrice)) + geom_point() 
+
+
+```
+
+
+```{r, include=FALSE}
+#having paved driveway seems to be important.
+
+data |> dplyr::select(SalePrice, PavedDrive) |> ggplot(aes(x = PavedDrive, y = SalePrice)) + geom_point()
+
+```
+
+```{r, include=FALSE}
+#garage condition and quality
+
+# might be interesting to see if a garage was touched up or down but with 59 records out of 1460... might be redundant
+
+table(data$GarageCond)
+
+table(data$GarageQual)
+
+table(data$GarageFinish)
+
+data |> dplyr::select(SalePrice, GarageCond, GarageQual) |> mutate(Same = GarageCond == GarageQual) |> filter(Same == FALSE)
+
+ggpubr::ggarrange(
+data |> dplyr::select(SalePrice, GarageCond, GarageQual) |> ggplot(aes(x = GarageCond, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, GarageCond, GarageQual) |> ggplot(aes(x = GarageQual, y = SalePrice)) + geom_point() +
+  labs(y = '') + scale_y_continuous()
+)
+```
+
+
+
+```{r, include=FALSE}
+
+# the price matters depending on the garage size.  
+
+data |> dplyr::select(SalePrice, GarageArea) |> ggplot(aes(x = GarageArea, y = SalePrice)) + geom_point()
+
+```
+
+
+```{r, include=FALSE}
+
+#the more cars the higher the price of the house.  shocker
+
+data |> dplyr::select(SalePrice, GarageCars) |> ggplot(aes(x = GarageCars, y = SalePrice)) + geom_point()
+
+
+```
+
+
+
+```{r, include=FALSE}
+
+#Garages that are finished have higher sales. Shocker.
+
+data |> dplyr::select(SalePrice, GarageFinish) |> ggplot(aes(x = GarageFinish, y = SalePrice)) + geom_point()
+
+```
+
+```{r, include=FALSE}
+
+#The later the year the car was built, the higher the sales price.
+
+data |> dplyr::select(SalePrice, GarageYrBlt) |> ggplot(aes(x = GarageYrBlt, y = SalePrice)) + geom_point()
+
+
+```
+
+```{r, include=FALSE}
+
+data |> dplyr::select(SalePrice, GarageType) |> ggplot(aes(x = GarageType, y = SalePrice)) + geom_point()
+
+```
+
+
+```{r, include=FALSE}
+# maybe look at if the place has a fireplace versus not???
+
+data |> dplyr::select(SalePrice, Fireplaces, FireplaceQu) |> ggplot(aes(x = Fireplaces, y = SalePrice)) + geom_point()
+
+data |> dplyr::select(SalePrice, Fireplaces, FireplaceQu) |> mutate(fpyn = ifelse(Fireplaces == 0, 0, 1)) |> 
+  ggplot(aes(x = fpyn, y = SalePrice)) + geom_point()
+
+
+# I doubt fireplace quality will matter.
+
+data |> dplyr::select(SalePrice, Fireplaces, FireplaceQu) |> ggplot(aes(x = FireplaceQu, y = SalePrice)) + geom_point()
+
+
+```
+
+
+```{r, include=FALSE}
+
+data |> dplyr::select(SalePrice, Functional) |> ggplot(aes(x = Functional, y = SalePrice)) + geom_point()
+
+data |> dplyr::select(SalePrice, Functional) |> mutate(funcyn = ifelse(Functional != 'Typ', 0, 1)) |> 
+  ggplot(aes(x = funcyn, y = SalePrice, group = funcyn)) + geom_boxplot()
+
+
+```
+
+```{r, include=FALSE}
+
+# On average, the more rooms above grade, the higher the price.
+ggpubr::ggarrange(
+data |> dplyr::select(SalePrice, TotRmsAbvGrd) |> ggplot(aes(x = TotRmsAbvGrd, y = SalePrice)) + geom_point(),
+
+
+# kitchen above grade will most likely be useless
+
+data |> dplyr::select(SalePrice, KitchenAbvGr, KitchenQual) |> ggplot(aes(x = KitchenAbvGr, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, KitchenAbvGr, KitchenQual) |> mutate(kagyn = ifelse(KitchenAbvGr == 0, 0, 1)) |> 
+  ggplot(aes(x = kagyn, y = SalePrice)) + geom_point(),
+
+# Kitchen qual may be useful.
+
+data |> dplyr::select(SalePrice, KitchenAbvGr, KitchenQual) |> ggplot(aes(x = KitchenQual, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BedroomAbvGr)  |> ggplot(aes(x = BedroomAbvGr, y = SalePrice, group = BedroomAbvGr)) + 
+  geom_boxplot()
+)
+
+# the number of bathrooms increase the price of the house. Obviously
+
+ggpubr::ggarrange(
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath) |> 
+  ggplot(aes(x = BsmtFullBath, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath) |> 
+  ggplot(aes(x = BsmtHalfBath, y = SalePrice)) + geom_point(),
+
+
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath) |> 
+  ggplot(aes(x = FullBath, y = SalePrice)) + geom_point(),
+
+
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath) |> 
+  ggplot(aes(x = HalfBath, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath) |> 
+  mutate(total_bath = BsmtFullBath +BsmtHalfBath+FullBath+HalfBath) |>
+  ggplot(aes(x = total_bath, y = SalePrice)) + geom_point()
+
+)
+
+
+data |> dplyr::select(SalePrice, BsmtFullBath, BsmtHalfBath, FullBath, HalfBath, TotRmsAbvGrd)
+
+
+```
+
+
+```{r, include=FALSE}
+# living area besides lowqualfinsf will be important
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, GrLivArea, LowQualFinSF, X1stFlrSF, X2ndFlrSF) |> 
+  ggplot(aes(x = GrLivArea, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, GrLivArea, LowQualFinSF, X1stFlrSF, X2ndFlrSF) |> 
+  ggplot(aes(x = LowQualFinSF, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, GrLivArea, LowQualFinSF, X1stFlrSF, X2ndFlrSF) |> 
+  ggplot(aes(x = X1stFlrSF, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, GrLivArea, LowQualFinSF, X1stFlrSF, X2ndFlrSF) |> 
+  ggplot(aes(x = X2ndFlrSF, y = SalePrice)) + geom_point()
+
+)
+
+data |> dplyr::select(SalePrice, GrLivArea, LowQualFinSF, X1stFlrSF, X2ndFlrSF) |> cor()
+
+```
+
+
+```{r, include=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, Heating, HeatingQC, CentralAir, Electrical) |> 
+  ggplot(aes(x = Heating, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, Heating, HeatingQC, CentralAir, Electrical) |> 
+  ggplot(aes(x = HeatingQC, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, Heating, HeatingQC, CentralAir, Electrical) |> 
+  ggplot(aes(x = CentralAir, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, Heating, HeatingQC, CentralAir, Electrical) |> 
+  ggplot(aes(x = Electrical, y = SalePrice)) + geom_point()
+
+)
+
+```
+
+
+```{r, include=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtExposure, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtFinType1, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtFinSF1, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtFinType2, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtFinSF2, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtExposure, BsmtFinType1, BsmtFinSF1, BsmtFinType2, BsmtFinSF2, BsmtUnfSF) |> 
+  ggplot(aes(x = BsmtUnfSF, y = SalePrice)) + geom_point()
+
+)
+
+#basement quality and condition are intersting.  Foundation and exterior conditions.
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, BsmtCond, BsmtQual, Foundation, ExterCond) |> 
+  ggplot(aes(x = BsmtCond, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtCond, BsmtQual, Foundation, ExterCond) |> 
+  ggplot(aes(x = BsmtQual, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtCond, BsmtQual, Foundation, ExterCond) |> 
+  ggplot(aes(x = Foundation, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtCond, BsmtQual, Foundation, ExterCond) |> 
+  ggplot(aes(x = ExterCond, y = SalePrice)) + geom_point(),
+
+data |> dplyr::select(SalePrice, BsmtCond, BsmtQual, Foundation, TotalBsmtSF) |> 
+  ggplot(aes(x = TotalBsmtSF, y = SalePrice)) + geom_point()
+
+)
+
+
+```
+
+
+```{r, include=FALSE}
+
+ggpubr::ggarrange(
+  
+data |> dplyr::select(SalePrice, Exterior1st) |> 
+  ggplot(aes(x = Exterior1st, y = SalePrice)) + geom_point() +
+  
+  theme(axis.text.x = element_text(angle = 90)),
+
+data |> dplyr::select(SalePrice, Exterior2nd) |> 
+  ggplot(aes(x = Exterior2nd, y = SalePrice)) + geom_point() +
+  
+  theme(axis.text.x = element_text(angle = 90))
+)
+
+ggpubr::ggarrange(
+data |> dplyr::select(SalePrice, MasVnrType) |> 
+  ggplot(aes(x = MasVnrType, y = SalePrice)) + geom_point() ,
+
+data |> dplyr::select(SalePrice, MasVnrArea) |> 
+  ggplot(aes(x = MasVnrArea, y = SalePrice)) + geom_point()
+
+)
+
+```
+
+```{r, include=FALSE}
+
+#condition of sale and Sale type. Probably won't use either
+
+data |> dplyr::select(SalePrice, SaleCondition) |> group_by(SaleCondition) |> count()
+
+data |> dplyr::select(SalePrice, SaleCondition) |> ggplot(aes(SaleCondition, SalePrice)) + geom_col()
+
+
+data |> dplyr::select(SalePrice, SaleType) |> group_by(SaleType) |> count()
+
+data |> dplyr::select(SalePrice, SaleType) |> ggplot(aes(SaleType, SalePrice)) + geom_col()
+
+
+```
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+
+plot = ggarrange(
+  
+data |> dplyr::select(SalePrice) |> ggplot(mapping = aes(SalePrice)) + geom_density() +
+  labs(x = 'Sale Price') + theme(axis.text.x = element_text(angle = 90)) + scale_y_continuous('') +
+  scale_x_continuous(labels = label_number_si()) + theme(axis.text = element_blank()) +
+  theme(axis.ticks.y = element_blank()), 
+
+data |> dplyr::select(SalePrice) |> ggplot(mapping = aes(log(SalePrice))) + geom_density() +
+  labs(x = 'Log Sale Price') + theme(axis.text.x = element_text(angle = 90)) + scale_y_continuous('') +
+  scale_x_continuous(labels = label_dollar()) + theme(axis.text = element_blank()) +
+  theme(axis.ticks.y = element_blank())
+
+)
+
+annotate_figure(plot, top = text_grob("Distribution of Sale Price", face = "bold", size = 14))
+```
+
+We can see a log transformation made the data more normally distributed.  As such, Our model evaluation will be based on RSME on the log scale.
+
+$$
+RMSE = mean((log(predictedsaleprice)-log(truesaleprice))^2)
+$$
+
+Second, some features were heavily skewed to one factor than another.  Below is a plot of a few features:
+
+```{r, fig.height=10, fig.width=10, echo=FALSE}
+
+ggpubr::ggarrange(
+
+data |> ggplot(aes(x = Utilities)) + geom_bar() + labs(title = 'Utilities'),
+
+data |> ggplot(aes(x = Street)) + geom_bar() + labs(title = 'Street'),
+
+data |> ggplot(aes(x = LandSlope)) + geom_bar() + labs(title = 'Land Slope'),
+
+data |> ggplot(aes(x = Condition2)) + geom_bar() + labs(title = 'Condition 2') +  theme(axis.text.x = element_text(angle = 90)),
+
+data |> ggplot(aes(x = RoofMatl)) + geom_bar() + labs(title = 'Roof Material') +  theme(axis.text.x = element_text(angle = 90)),
+
+data |> ggplot(aes(x = Heating)) + geom_bar() + labs(title = 'Heating'),
+
+data |> ggplot(aes(x = PoolQC)) + geom_bar() + labs(title = 'Pool Quality Control'),
+
+data |> ggplot(aes(x = MiscFeature)) + geom_bar() + labs(title = 'Miscellaneous Feature')
+
+
+
+)
+```
+
+We can see that each feature favors one factor compared to others. Therefore, Utilities, Miscfeature, poolqc, street,
+landslope, condition2, roofmatl, and heating were removed.
+
+# Feature Engineering
+
+Here is a look of the new features we created:
+
+* Total_Bath: The total number of baths in the house. This includes half baths.
+* fpyn: whether or not the house has a fire place
+* remod: whether or not the house had work done
+* Total_area: The total area of the house
+* Total_Rooms: the total bathrooms and rooms. Does not include basement rooms
+* HasPool: whether or not the house has a pool
+* Total Porch Area: The total area for all features related to porch.
+* HasGarage: whether or not a house has a garage
+* Overall: The overall total of overqual and overcond
+
+The features that were used to create the new features were removed from the data set.
+
+```{r, include=FALSE}
+
+# Remove variables from preliminary results.  Mostly no data or the data heavily influences one side
+
+fedata = data 
+
+# Check for NA values in each column
+na_summary <- fedata %>%
+  summarise_all(~sum(is.na(.)))
+
+# Print the summary
+print(na_summary)
+
+fedata = fedata |> mutate(Fence = ifelse(is.na(Fence), "None", Fence))
+
+fedata = fedata |> mutate(fpyn = ifelse(Fireplaces == 0, 0, 1)) |> dplyr::select(-Fireplaces)
+
+fedata = fedata |> mutate(total_bath = BsmtFullBath +BsmtHalfBath+FullBath+HalfBath) |> dplyr::select(-BsmtFullBath, -BsmtHalfBath, -FullBath, -HalfBath)
+
+fedata = fedata |> mutate(Alley = ifelse(is.na(Alley), 'No Access', Alley))
+
+fedata = fedata |> mutate(FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu))
+
+fedata = fedata |> mutate(remod = ifelse(YearRemodAdd - YearBuilt > 0, 1, 0))
+
+fedata = fedata |> mutate(House_age = 2023-YearBuilt) |> dplyr::select(-YearBuilt, -YearRemodAdd)
+
+fedata = fedata |> mutate(Total_Area = GrLivArea+TotalBsmtSF) |> 
+  dplyr::select(-GrLivArea, -TotalBsmtSF)
+
+fedata = fedata |> mutate(Total_Rooms = BedroomAbvGr+TotRmsAbvGrd) |> 
+  dplyr::select(-BedroomAbvGr, -TotRmsAbvGrd)
+
+fedata = fedata |> mutate(Haspool = ifelse(PoolArea > 0, 1, 0)) |> 
+  dplyr::select(-PoolArea) |> mutate(Haspool = as.factor(Haspool))
+
+fedata = fedata |> mutate(Total_Porch_Area =OpenPorchSF + EnclosedPorch+ X3SsnPorch + 
+                            ScreenPorch + WoodDeckSF) |> 
+  dplyr::select(-OpenPorchSF, -EnclosedPorch, -X3SsnPorch, -ScreenPorch, -WoodDeckSF)
+
+fedata = fedata |> mutate(HasGarage = ifelse(is.na(GarageYrBlt), 0, 1)) |> 
+  dplyr::select(-GarageYrBlt) |> mutate(HasGarage = as.factor(HasGarage))
+
+fedata = fedata |> mutate(Overall = OverallQual+OverallCond) |> 
+  dplyr::select(-OverallQual, -OverallCond)
+
+fedata = fedata |> mutate(BsmtFinSF1 = ifelse(is.na(BsmtFinSF1), 0, BsmtFinSF1))
+
+fedata = fedata |> mutate(BsmtFinSF2 = ifelse(is.na(BsmtFinSF2), 0, BsmtFinSF2))
+
+fedata = fedata |> mutate(BsmtUnfSF = ifelse(is.na(BsmtUnfSF), 0, BsmtUnfSF))
+
+```
+
+```{r, include=FALSE}
+na_summary <- fedata %>%
+  summarise_all(~sum(is.na(.)))
+
+# Print the summary
+print(na_summary)
+```
+
+```{r, include=FALSE}
+# fixing NA values
+fedata = fedata |> mutate(LotFrontage = ifelse(is.na(LotFrontage), 0, LotFrontage))
+fedata = fedata |> mutate(MasVnrType = ifelse(is.na(MasVnrType), 'None', MasVnrType))
+fedata = fedata |> mutate(MasVnrArea = ifelse(is.na(MasVnrArea), 0, MasVnrArea))
+fedata = fedata |> mutate(BsmtQual = ifelse(is.na(BsmtQual), 0, BsmtQual))
+fedata = fedata |> mutate(BsmtCond = ifelse(is.na(BsmtCond), 0, BsmtCond))
+fedata = fedata |> mutate(GarageQual = ifelse(is.na(GarageQual), "None", GarageQual))
+fedata = fedata |> mutate(GarageCond = ifelse(is.na(GarageCond), "None", GarageCond))
+
+fedata = fedata |> mutate(Electrical = ifelse(is.na(Electrical), "None", Electrical))
+
+fedata = fedata |> mutate(BsmtExposure = ifelse(is.na(BsmtExposure), "None", BsmtExposure))
+fedata = fedata |> mutate(BsmtFinType1 = ifelse(is.na(BsmtFinType1), "None", BsmtFinType1))
+fedata = fedata |> mutate(BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2))
+fedata = fedata |> mutate(GarageType = ifelse(is.na(GarageType), 'None', GarageType))
+fedata = fedata |> mutate(GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish))
+
+fedata = fedata |> mutate_if(is.character, as.factor)
+
+fedata = fedata |> dplyr::select(-Id, -MiscFeature, -PoolQC, -Street, -Utilities,
+                                 -LandSlope, -Condition2, -RoofMatl, -Heating, -MSZoning, -Exterior1st, -Exterior2nd,
+                                 -KitchenQual, -Functional, -SaleType, -HeatingQC, -Electrical, -Condition1,
+                                 -Neighborhood, -RoofStyle, -ExterCond, -Foundation)
+
+
+
+```
+
+
+```{r, include=FALSE}
+
+
+testdata = read.csv("D:\\Data Analysis 3\\Project 2\\test.csv")
+
+
+testdata %>%
+  summarise_all(~sum(is.na(.)))
+
+```
+
+```{r, include=FALSE}
+
+testdata = testdata |> mutate(Fence = ifelse(is.na(Fence), "None", Fence))
+
+testdata = testdata |> mutate(fpyn = ifelse(Fireplaces == 0, 0, 1)) |> dplyr::select(-Fireplaces)
+
+testdata = testdata |> mutate(total_bath = BsmtFullBath +BsmtHalfBath+FullBath+HalfBath) |> 
+  dplyr::select(-BsmtFullBath, -BsmtHalfBath, -FullBath, -HalfBath) |>
+  mutate(total_bath = ifelse(is.na(total_bath), 0, total_bath))
+
+testdata = testdata |> mutate(Alley = ifelse(is.na(Alley), 'No Access', Alley))
+
+testdata = testdata |> mutate(FireplaceQu = ifelse(is.na(FireplaceQu), 'None', FireplaceQu))
+
+testdata = testdata |> mutate(remod = ifelse(YearRemodAdd - YearBuilt > 0, 1, 0))
+
+testdata = testdata |> mutate(House_age = 2023-YearBuilt) |> dplyr::select(-YearBuilt, -YearRemodAdd)
+
+testdata = testdata |> mutate(Total_Area = GrLivArea+TotalBsmtSF) |> 
+  dplyr::select(-GrLivArea, -TotalBsmtSF) |>
+  mutate(Total_Area = ifelse(is.na(Total_Area), 0, Total_Area))
+
+testdata = testdata |> mutate(Total_Rooms = BedroomAbvGr+TotRmsAbvGrd) |> 
+  dplyr::select(-BedroomAbvGr, -TotRmsAbvGrd)
+
+testdata = testdata |> mutate(Haspool = ifelse(PoolArea > 0, 1, 0)) |> 
+  dplyr::select(-PoolArea) |> mutate(Haspool = as.factor(Haspool))
+
+testdata = testdata |> mutate(Total_Porch_Area =OpenPorchSF + EnclosedPorch+ X3SsnPorch + 
+                            ScreenPorch + WoodDeckSF) |> 
+  dplyr::select(-OpenPorchSF, -EnclosedPorch, -X3SsnPorch, -ScreenPorch, -WoodDeckSF)
+
+testdata = testdata |> mutate(HasGarage = ifelse(GarageYrBlt > 0, 1, 0)) |> 
+  dplyr::select(-GarageYrBlt) |> mutate(HasGarage = ifelse(is.na(HasGarage), 0, 1)) |>
+  mutate(HasGarage = as.factor(HasGarage)) 
+
+testdata = testdata |> mutate(Overall = OverallQual+OverallCond) |> 
+  dplyr::select(-OverallQual, -OverallCond)
+
+testdata = testdata |> mutate(BsmtFinSF1 = ifelse(is.na(BsmtFinSF1), 0, BsmtFinSF1))
+
+testdata = testdata |> mutate(BsmtFinSF2 = ifelse(is.na(BsmtFinSF2), 0, BsmtFinSF2))
+testdata = testdata |> mutate(BsmtUnfSF = ifelse(is.na(BsmtUnfSF), 0, BsmtUnfSF))
+```
+
+
+```{r, include=FALSE}
+na_summary <- testdata %>%
+  summarise_all(~sum(is.na(.)))
+
+# Print the summary
+print(na_summary)
+```
+
+
+```{r, include=FALSE}
+# fixing NA values
+testdata = testdata |> mutate(LotFrontage = ifelse(is.na(LotFrontage), 0, LotFrontage))
+testdata = testdata |> mutate(MasVnrType = ifelse(is.na(MasVnrType), 'None', MasVnrType))
+testdata = testdata |> mutate(MasVnrArea = ifelse(is.na(MasVnrArea), 0, MasVnrArea))
+testdata = testdata |> mutate(BsmtQual = ifelse(is.na(BsmtQual), 0, BsmtQual))
+testdata = testdata |> mutate(BsmtCond = ifelse(is.na(BsmtCond), 0, BsmtCond))
+testdata = testdata |> mutate(GarageQual = ifelse(is.na(GarageQual), "None", GarageQual))
+testdata = testdata |> mutate(GarageCond = ifelse(is.na(GarageCond), "None", GarageCond))
+testdata = testdata |> mutate(GarageCars = ifelse(is.na(GarageCars), 0, GarageCars))
+testdata = testdata |> mutate(GarageArea = ifelse(is.na(GarageArea), 0, GarageArea))
+testdata = testdata |> mutate(BsmtExposure = ifelse(is.na(BsmtExposure), "None", BsmtExposure))
+testdata = testdata |> mutate(BsmtFinType1 = ifelse(is.na(BsmtFinType1), "None", BsmtFinType1))
+testdata = testdata |> mutate(BsmtFinType2 = ifelse(is.na(BsmtFinType2), 'None', BsmtFinType2))
+testdata = testdata |> mutate(GarageType = ifelse(is.na(GarageType), 'None', GarageType))
+testdata = testdata |> mutate(GarageFinish = ifelse(is.na(GarageFinish), 'None', GarageFinish))
+
+testdata = testdata |> mutate_if(is.character, as.factor)
+
+testdata = testdata |> dplyr::select(-MiscFeature, -PoolQC, -Street, -Utilities,
+                                 -LandSlope, -Condition2, -RoofMatl, -Heating, -MSZoning, -Exterior1st, 
+                                 -Exterior2nd, -KitchenQual, -Functional, -SaleType, -HeatingQC,
+                                 -Electrical, -Condition1, -Neighborhood,-RoofStyle, -ExterCond, -Foundation)
+
+
+
+```
+
+
+# Model Building
+
+We split the training data into a train and test set to evaluate our models.  Kaggle gave us a different test 
+set without salesprice as a feature. The following are the models used: MARS, Random
+Forest, and XBTree Boosting. For each model, we use the 'caret' package to tune our models.
+The data was center, scaled, and we use 5 fold cross validation to help evaluate each model. 
+
+```{r, include=FALSE}
+
+set.seed(123)
+
+trainIndex <- createDataPartition(fedata$SalePrice, p = .7, 
+                                  list = FALSE, 
+                                  times = 1)
+
+train = fedata[trainIndex,]
+test = fedata[-trainIndex,]
+
+na_summary <- train %>%
+  summarise_all(~sum(is.na(.)))
+
+print(na_summary)
+
+
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+
+fitControl <- trainControl(## 10-fold CV
+                           method = "cv",
+                           number = 5)
+```
+
+## Random Forest
+
+
+```{r, include=FALSE, eval=FALSE}
+
+rf<-train(SalePrice~., data = train, trControl = fitControl,
+           preProc = c('center', 'scale'),
+                 method = 'rf', 
+                 tuneGrid = expand.grid(mtry = seq(10, 48, by = 2))
+           
+               ) 
+rf
+
+rf.pred = predict(rf, newdata = test)
+
+sqrt(mean((log(rf.pred) - log(test$SalePrice))^2))
+
+varImp(rf)
+plot(rf)
+
+#.14 with mtry = 34
+```
+
+## XGboosting model
+
+```{r, eval=FALSE,  include=FALSE}
+
+xg<-train(SalePrice~., data = train, trControl = fitControl,
+           preProc = c('center', 'scale'),
+                 method = 'xgbTree', 
+                 tuneGrid = expand.grid(eta = seq(0.1, 1, by = 0.1),
+                                        nrounds = seq(100, 1000, by = 100),
+                            max_depth = c(2, 3, 4, 5),
+                            gamma = c(0),
+                            colsample_bytree = c(0.7),
+                            min_child_weight = c(5),
+                            subsample = c(0.6)))
+
+xg
+
+xg.pred = predict(xg, newdata = test)
+
+sqrt(mean((log(xg.pred) - log(test$SalePrice))^2))
+
+varImp(xg)
+plot(xg)
+
+  #KAGGLE PURPOSEs
+
+xg.kag<-train(SalePrice~., data = fedata, trControl = fitControl,
+           preProc = c('center', 'scale'),
+                 method = 'xgbTree', 
+                 tuneGrid = expand.grid(eta = seq(0.1, 1, by = 0.1),
+                                        nrounds = seq(100, 1000, by = 100),
+                            max_depth = c(2, 3, 4, 5),
+                            gamma = c(0),
+                            colsample_bytree = c(0.7),
+                            min_child_weight = c(5),
+                            subsample = c(0.6)))
+
+
+xg.predkag = predict(xg.kag, newdata = testdata)
+kag_sub = data.frame('Id' = testdata$Id,
+                     'SalePrice' = xg.predkag)
+
+write.csv(kag_sub, file = "D:\\Data Analysis 3\\Project 2\\predictions.csv")
+
+# 0.132
+```
+
+## MARS
+
+```{r, eval=FALSE, include=FALSE}
+
+mars_mod <- train(SalePrice~., data = train, trControl = fitControl,
+                      preProc = c('center', 'scale'),
+                      method = "earth",
+                  tuneGrid = expand.grid(nprune = seq(1,40, 2),
+                                         degree = c(1:3))
+)
+
+print(mars_mod)
+
+mars.pred = predict(mars_mod, newdata = test)
+
+sqrt(mean((log(mars.pred) - log(test$SalePrice))^2))
+
+varImp(mars_mod)
+
+#KAGGLE
+
+mars_mod_kag <- train(SalePrice~., data = fedata, trControl = fitControl,
+                      preProc = c('center', 'scale'),
+                      method = "earth",
+                  tuneGrid = expand.grid(nprune = seq(1,40, 2),
+                                         degree = c(1:3))
+)
+
+
+mars.pred.kag = predict(mars_mod, newdata = testdata)
+
+
+
+```
+
+
+The best random forest model we obtained used 40 features at each split yielding the lowest MSE to be 28474.90. 
+The best MARS model we obtained uses 27 prunes and a degree of 2 yielding the lowest mse to be 33245.  Finally,
+the best XGTree boost model we obtained uses minimum child weight to be 5, subsample to be 0.6, nrounds = 100,
+max_depth = 5, eta = 0.1, gamma = 0, colsample_bytree = 0.7.  This resulted in the lowest MSE for all models
+to be 27644.56.
+
+
+
+# Conclusion
+
+Below is a table of the rmse for each model on the log scale:
+
+```{r, include=FALSE}
+rmse_table = data.frame('Model' = c('Random Forest', "XGTree", 'MARS'),
+                        'RMSE' = c(.137, .132, 0.146))
+```
+
+```{r, echo=FALSE}
+
+knitr::kable(rmse_table)
+
+```
+
+Here we see XGTree Boost had the best prediction accuracy.  
+For future work, it would be interesting to broaden this analysis to other cities,
+states, or countries.  It would be nice to not need exactly the same number of observations in the Kaggle test
+set for submission, since individual observations could not be removed.  Instead, a full column was removed.
+In the end, it may not matter as that feature was redundant.  
+
+
+
